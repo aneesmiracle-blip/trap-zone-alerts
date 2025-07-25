@@ -1,90 +1,44 @@
-import os
-import json
+import time
 import requests
 import pandas as pd
-import matplotlib.pyplot as plt
 from datetime import datetime
-import asyncio
-from telegram import Bot
-from io import BytesIO
+import telegram
 
-# === Telegram Setup ===
+# === CONFIGURATION ===
 BOT_TOKEN = "7481875754:AAFVurIEOgcftMw6H-xgp58lzCUPf28AR2g"
 CHAT_ID = "5964132878"
+ALERT_INTERVAL_MINUTES = 10
+NSE_OI_URL = "https://www.nseindia.com/api/fo-analytics/participantWiseOI?type=Futures"
 
-# === Fetch NSE Option Chain ===
-def fetch_nse_option_chain(symbol):
-    url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://www.nseindia.com/option-chain"
-    }
-    try:
-        session = requests.Session()
-        session.get("https://www.nseindia.com", headers=headers, timeout=5)
-        response = session.get(url, headers=headers, timeout=5)
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+# === TELEGRAM FUNCTION ===
+def send_telegram_message(message):
+    bot = telegram.Bot(token=BOT_TOKEN)
+    bot.send_message(chat_id=CHAT_ID, text=message)
+
+# === DATA FETCH FUNCTION ===
+def fetch_nse_participant_data():
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    # Access homepage once to set cookies
+    session.get("https://www.nseindia.com", timeout=5)
+    response = session.get(NSE_OI_URL, timeout=10)
+
+    if response.status_code == 200:
         data = response.json()
-        records = data['records']['data']
-        spot_price = data['records']['underlyingValue']
-        calls, puts = [], []
-        for item in records:
-            strike = item.get("strikePrice")
-            ce = item.get("CE")
-            pe = item.get("PE")
-            if ce:
-                ce["strikePrice"] = strike
-                calls.append(ce)
-            if pe:
-                pe["strikePrice"] = strike
-                puts.append(pe)
-        df_calls = pd.DataFrame(calls)
-        df_puts = pd.DataFrame(puts)
-        return df_calls, df_puts, spot_price
-    except Exception as e:
-        return None, None, None
-
-# === Trap Score ===
-def calculate_trap_score(df):
-    df["trap_score"] = (df["openInterest"] * 0.5) + (df["changeinOpenInterest"] * 0.5)
-    return df.sort_values("trap_score", ascending=False)
-
-# === Save Excel ===
-def save_to_excel(df_calls, df_puts, spot_price):
-    folder = os.path.join(os.getcwd(), "nifty_trap_output")
-    os.makedirs(folder, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filepath = os.path.join(folder, f"trap_zones_{timestamp}.xlsx")
-    with pd.ExcelWriter(filepath) as writer:
-        df_calls.to_excel(writer, sheet_name="Call Trap Zones", index=False)
-        df_puts.to_excel(writer, sheet_name="Put Trap Zones", index=False)
-    return filepath
-
-# === Telegram Message & File ===
-async def send_telegram(msg, file_path=None):
-    bot = Bot(token=BOT_TOKEN)
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
-    if file_path:
-        with open(file_path, "rb") as f:
-            await bot.send_document(chat_id=CHAT_ID, document=f)
-
-# === MAIN ===
-if __name__ == "__main__":
-    df_calls, df_puts, spot_price = fetch_nse_option_chain("NIFTY")
-    if df_calls is not None and df_puts is not None:
-        df_calls_filtered = calculate_trap_score(df_calls).head(3)
-        df_puts_filtered = calculate_trap_score(df_puts).head(3)
-
-        msg = f"""📈 NIFTY Trap Zone Alert - {datetime.now().strftime('%d-%m-%Y %H:%M')}
-
-📍 Spot Price: {spot_price:.2f}
-
-🔴 Call Trap Zones (Resistance):
-{df_calls_filtered[['strikePrice', 'trap_score']].to_string(index=False)}
-
-🟢 Put Trap Zones (Support):
-{df_puts_filtered[['strikePrice', 'trap_score']].to_string(index=False)}
-"""
-        excel_path = save_to_excel(df_calls_filtered, df_puts_filtered, spot_price)
-        asyncio.run(send_telegram(msg, excel_path))
+        return data
     else:
-        asyncio.run(send_telegram("❌ Failed to fetch NIFTY option chain data."))
+        raise Exception(f"Failed to fetch NSE data: Status {response.status_code}")
+
+# === DATA ANALYSIS FUNCTION ===
+def analyze_participant_data(data):
+    df = pd.DataFrame(data["data"])
+    latest_date = df["date"].max()
+    latest_data = df[df["date"] == latest_date]
+
+    msg = f"📊 Participant OI Summary ({latest_date}):\n\n"
+    for client_type in ["Client", "FI]()_
